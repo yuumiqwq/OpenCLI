@@ -149,7 +149,13 @@ describe('daemon transport contracts (real daemon)', () => {
       if (process.env.CI === 'true') throw new Error(skipReason);
       return;
     }
-    daemon = spawn(process.execPath, [DAEMON_ENTRY], { stdio: ['ignore', 'ignore', 'pipe'] });
+    daemon = spawn(process.execPath, [DAEMON_ENTRY], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      // The fake extension's origin ('chrome-extension://e2e-fake-extension')
+      // is not the published Chrome Web Store id, so it needs the same
+      // sideload/dev allowlist escape hatch a real unpacked dev build would use.
+      env: { ...process.env, OPENCLI_ALLOWED_EXTENSION_IDS: 'e2e-fake-extension' },
+    });
     let stderr = '';
     daemon.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     try {

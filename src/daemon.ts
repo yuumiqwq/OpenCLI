@@ -22,7 +22,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { DEFAULT_DAEMON_PORT, isIgnorableDaemonPortEnv, unsupportedDaemonPortEnvMessage } from './constants.js';
+import { DEFAULT_DAEMON_PORT, isIgnorableDaemonPortEnv, isAllowedExtensionOrigin, unsupportedDaemonPortEnvMessage } from './constants.js';
 import { EXIT_CODES } from './errors.js';
 import { log } from './logger.js';
 import { PKG_VERSION } from './version.js';
@@ -498,12 +498,14 @@ const wss = new WebSocketServer({
   server: httpServer,
   path: '/ext',
   verifyClient: ({ req }: { req: IncomingMessage }) => {
-    // Block browser-originated WebSocket connections.  Browsers don't
-    // enforce CORS on WebSocket, so a malicious webpage could connect to
-    // ws://localhost:19825/ext and impersonate the Extension.  Real Chrome
-    // Extensions send origin chrome-extension://<id>.
+    // Only OpenCLI's own extension (by published id, or an explicitly
+    // allowlisted sideloaded/dev id via OPENCLI_ALLOWED_EXTENSION_IDS) may
+    // open this socket. A bare `chrome-extension://` prefix check matches
+    // every OTHER installed extension too, which would be treated
+    // identically to the real Browser Bridge extension: full command
+    // execution in the user's authenticated browser profile.
     const origin = req.headers['origin'] as string | undefined;
-    return !origin || origin.startsWith('chrome-extension://');
+    return isAllowedExtensionOrigin(origin);
   },
 });
 

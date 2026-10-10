@@ -31,6 +31,7 @@
     "./pipeline": "./dist/src/pipeline/index.js"
   },
   "files": [
+    "npm-shrinkwrap.json",
     "dist/src/",
     "clis/",
     "skills/opencli-*/**",
@@ -89,6 +90,16 @@
     "undici": "7.30.0",
     "ws": "^8.18.0"
   },
+  "bundleDependencies": [
+    "@mozilla/readability",
+    "cli-table3",
+    "commander",
+    "js-yaml",
+    "turndown",
+    "turndown-plugin-gfm",
+    "undici",
+    "ws"
+  ],
   "devDependencies": {
     "@types/jsdom": "^27.0.0",
     "@types/js-yaml": "^4.0.9",

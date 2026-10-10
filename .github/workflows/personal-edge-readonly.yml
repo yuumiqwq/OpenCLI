@@ -18,8 +18,6 @@ jobs:
     timeout-minutes: 15
     env:
       CI: 'true'
-      HOME: ${{ runner.temp }}/opencli-personal
-      USERPROFILE: ${{ runner.temp }}/opencli-personal
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -30,5 +28,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npx --no-install vitest run --project unit --project adapter src/constants.test.ts src/plugin.test.ts src/browser/daemon-client.test.ts src/node-network.test.ts clis/xiaohongshu
+        env:
+          HOME: ${{ runner.temp }}/opencli-personal
+          USERPROFILE: ${{ runner.temp }}/opencli-personal
       - run: npx --no-install vitest run --project e2e-fixed-port tests/e2e/daemon-transport.test.ts
+        env:
+          HOME: ${{ runner.temp }}/opencli-personal
+          USERPROFILE: ${{ runner.temp }}/opencli-personal
       - run: npm audit --omit=dev --audit-level=high

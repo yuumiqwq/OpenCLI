@@ -498,12 +498,10 @@ const wss = new WebSocketServer({
   server: httpServer,
   path: '/ext',
   verifyClient: ({ req }: { req: IncomingMessage }) => {
-    // Only OpenCLI's own extension (by published id, or an explicitly
-    // allowlisted sideloaded/dev id via OPENCLI_ALLOWED_EXTENSION_IDS) may
-    // open this socket. A bare `chrome-extension://` prefix check matches
-    // every OTHER installed extension too, which would be treated
-    // identically to the real Browser Bridge extension: full command
-    // execution in the user's authenticated browser profile.
+    // Restrict browser-supplied origins to OpenCLI's published extension id
+    // or an explicitly allowed sideloaded id. This blocks another extension
+    // joining under its own origin. It is not cryptographic authentication:
+    // a local non-browser client can still forge an allowed Origin header.
     const origin = req.headers['origin'] as string | undefined;
     return isAllowedExtensionOrigin(origin);
   },

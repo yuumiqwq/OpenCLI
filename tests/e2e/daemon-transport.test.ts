@@ -185,6 +185,25 @@ describe('daemon transport contracts (real daemon)', () => {
     return false;
   }
 
+  it.each([undefined, 'https://example.com', 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'])('rejects an unapproved WebSocket Origin %s before accepting hello', async (origin) => {
+    if (guard()) return;
+    const status = await new Promise<number>((resolve, reject) => {
+      const socket = new WebSocket(`${BASE.replace('http:', 'ws:')}/ext`, {
+        ...(origin ? { origin } : {}),
+        handshakeTimeout: 2_000,
+      });
+      socket.once('unexpected-response', (_request, response) => {
+        response.resume();
+        socket.terminate();
+        resolve(response.statusCode ?? 0);
+      });
+      socket.once('open', () => { socket.terminate(); reject(new Error('Unapproved WebSocket origin accepted')); });
+      socket.once('error', reject);
+    });
+    // ws returns 401 when its synchronous verifyClient predicate returns false.
+    expect(status).toBe(401);
+  });
+
   it('dispatches a command to the connected extension and correlates the result', async () => {
     if (guard()) return;
     const ext = new FakeExtension();

@@ -1,0 +1,34 @@
+name: Personal Edge read-only checks
+
+on:
+  push:
+    branches: [personal/edge-readonly-20261010]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      HOME: ${{ runner.temp }}/opencli-personal
+      USERPROFILE: ${{ runner.temp }}/opencli-personal
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx --no-install vitest run --project unit --project adapter src/constants.test.ts src/plugin.test.ts src/browser/daemon-client.test.ts src/node-network.test.ts clis/xiaohongshu
+      - run: npx --no-install vitest run --project e2e-fixed-port tests/e2e/daemon-transport.test.ts
+      - run: npm audit --omit=dev --audit-level=high

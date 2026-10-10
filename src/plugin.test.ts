@@ -477,7 +477,7 @@ describe('listPlugins', () => {
     fs.writeFileSync(path.join(localTarget, 'hello.js'), 'cli({ site: "test", name: "hello", access: "read" })');
     try { fs.unlinkSync(linkPath); } catch {}
     try { fs.rmSync(linkPath, { recursive: true, force: true }); } catch {}
-    fs.symlinkSync(localTarget, linkPath, 'dir');
+    fs.symlinkSync(localTarget, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock['__test-list-plugin__'] = {
@@ -532,6 +532,19 @@ describe('uninstallPlugin', () => {
   it('throws for non-existent plugin', () => {
     expect(() => uninstallPlugin('__nonexistent__')).toThrow('not installed');
   });
+
+  it('rejects a traversal name instead of deleting outside PLUGINS_DIR', () => {
+    expect(() => uninstallPlugin('../../etc')).toThrow('Invalid plugin name');
+  });
+
+  it('rejects a name containing a path separator', () => {
+    expect(() => uninstallPlugin('a/../../b')).toThrow('Invalid plugin name');
+  });
+
+  it.each(['..', '.', 'D:outside', 'D:\\outside', 'safe:stream', '..\\outside', 'safe.', 'safe ', 'NUL', 'COM1.txt'])('rejects unsafe portable name %j before filesystem access', (name) => {
+    expect(() => uninstallPlugin(name)).toThrow('Invalid plugin name');
+    expect(() => updatePlugin(name)).toThrow('Invalid plugin name');
+  });
 });
 
 describe('updatePlugin', () => {
@@ -545,7 +558,7 @@ describe('updatePlugin', () => {
 
     fs.mkdirSync(PLUGINS_DIR, { recursive: true });
     fs.writeFileSync(path.join(localTarget, 'hello.js'), 'cli({ site: "test", name: "hello", access: "read" })');
-    fs.symlinkSync(localTarget, linkPath, 'dir');
+    fs.symlinkSync(localTarget, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock['__test-local-update__'] = {
@@ -821,7 +834,7 @@ describe('isSymlinkSync', () => {
     const target = path.join(tmpDir, 'target');
     const link = path.join(tmpDir, 'link');
     fs.mkdirSync(target);
-    fs.symlinkSync(target, link, 'dir');
+    fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
     expect(_isSymlinkSync(link)).toBe(true);
   });
 
@@ -845,7 +858,7 @@ describe('monorepo uninstall with symlink', () => {
     fs.writeFileSync(path.join(subDir, 'cmd.js'), 'cli({ site: "test", name: "cmd", access: "read" })');
 
     fs.mkdirSync(PLUGINS_DIR, { recursive: true });
-    fs.symlinkSync(subDir, pluginDir, 'dir');
+    fs.symlinkSync(subDir, pluginDir, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock['__test-mono-sub__'] = {
@@ -915,7 +928,7 @@ describe('listPlugins with monorepo metadata', () => {
 
     fs.mkdirSync(PLUGINS_DIR, { recursive: true });
     try { fs.unlinkSync(testLink); } catch {}
-    fs.symlinkSync(testSymlinkTarget, testLink, 'dir');
+    fs.symlinkSync(testSymlinkTarget, testLink, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock['__test-mono-list__'] = {
@@ -992,6 +1005,12 @@ describe('installLocalPlugin', () => {
 
   it('throws for non-existent path', () => {
     expect(() => _installLocalPlugin('/does/not/exist', 'x')).toThrow('does not exist');
+  });
+
+  it.each(['../outside', 'D:outside', 'safe:stream'])('rejects unsafe manifest name %j during local installation', (name) => {
+    fs.writeFileSync(path.join(tmpDir, 'opencli-plugin.json'), JSON.stringify({ name }));
+    expect(() => _installLocalPlugin(tmpDir, pluginName)).toThrow('Invalid plugin name');
+    expect(fs.existsSync(path.join(PLUGINS_DIR, pluginName))).toBe(false);
   });
 });
 
@@ -1276,7 +1295,7 @@ describe('updatePlugin transactional staging', () => {
     fs.mkdirSync(subDir, { recursive: true });
     fs.writeFileSync(path.join(subDir, 'old.js'), 'cli({ site: "old", name: "old", access: "read" })');
     fs.mkdirSync(PLUGINS_DIR, { recursive: true });
-    fs.symlinkSync(subDir, monorepoLink, 'dir');
+    fs.symlinkSync(subDir, monorepoLink, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock[monorepoPluginName] = {
@@ -1329,7 +1348,7 @@ describe('updatePlugin transactional staging', () => {
     fs.mkdirSync(oldSubDir, { recursive: true });
     fs.writeFileSync(path.join(oldSubDir, 'old.js'), 'cli({ site: "old", name: "old", access: "read" })');
     fs.mkdirSync(PLUGINS_DIR, { recursive: true });
-    fs.symlinkSync(oldSubDir, monorepoLink, 'dir');
+    fs.symlinkSync(oldSubDir, monorepoLink, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock[monorepoPluginName] = {
@@ -1378,7 +1397,7 @@ describe('updatePlugin transactional staging', () => {
     fs.mkdirSync(oldSubDir, { recursive: true });
     fs.writeFileSync(path.join(oldSubDir, 'old.js'), 'cli({ site: "old", name: "old", access: "read" })');
     fs.mkdirSync(PLUGINS_DIR, { recursive: true });
-    fs.symlinkSync(oldSubDir, monorepoLink, 'dir');
+    fs.symlinkSync(oldSubDir, monorepoLink, process.platform === 'win32' ? 'junction' : 'dir');
 
     const lock = _readLockFile();
     lock[monorepoPluginName] = {

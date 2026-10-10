@@ -27,7 +27,8 @@ const WAIT_FOR_CONTENT_JS = `
       if (findNoteCard()) return 'content';
       const bodyText = document.body?.innerText || '';
       if (/登录后查看搜索结果/.test(bodyText) || document.querySelector('#login-btn')) return 'login_wall';
-      if (/请求太频繁|访问频次异常|安全限制/.test(bodyText)) return 'security_block';
+      if (/请求太频繁|访问频次异常|安全限制|Requests too frequent|Scan with logged-in/i.test(bodyText) ||
+          location.pathname.startsWith('/website-login/captcha')) return 'security_block';
       return null;
     };
     const found = detect();
@@ -376,8 +377,8 @@ function buildApplySearchFiltersJs(requestedFilters) {
         const authBlocked = () => /登录后查看搜索结果/.test(document.body?.innerText || '') ||
           visible(document.querySelector('#login-btn'));
         const locationBlocked = () => /请开启浏览器地理位置权限/.test(document.body?.innerText || '');
-        const panels = () => visibleMatches(document, '.search-layout__top > .filter > .filter-panel');
-        const triggers = () => visibleMatches(document, '.search-layout__top > .filter');
+        const panels = () => visibleMatches(document, '.search-layout__top > .filter > .filter-panel, .filter.ai-chat-filter > .filter-panel');
+        const triggers = () => visibleMatches(document, '.search-layout__top > .filter, .filter.ai-chat-filter');
 
         const openPanel = async () => {
           let clicked = false;
@@ -664,7 +665,21 @@ export function buildScrollHarvestJs(webHost, targetCount, options = {}) {
           rootScroller?.clientHeight || 0,
           document.documentElement?.clientHeight || 0
         );
+        const innerScroller = () => {
+          const element = document.querySelector('.search-layout-wrapper');
+          if (!element || !/(auto|scroll)/.test(getComputedStyle(element).overflowY)) return null;
+          return rootScrollHeight() <= rootClientHeight() + 2 ? element : null;
+        };
         const readScrollMetrics = () => {
+          const inner = innerScroller();
+          if (inner) {
+            return {
+              rootTop: inner.scrollTop,
+              scrollTop: inner.scrollTop,
+              scrollHeight: inner.scrollHeight,
+              clientHeight: inner.clientHeight,
+            };
+          }
           const rootTop = Math.max(
             window.scrollY || window.pageYOffset || 0,
             rootScroller?.scrollTop || 0,
@@ -683,7 +698,10 @@ export function buildScrollHarvestJs(webHost, targetCount, options = {}) {
           // complete virtualized frame before it is harvested.
           const viewport = metrics.clientHeight || configuredStep;
           const scrollStep = Math.max(1, Math.min(configuredStep, viewport));
-          if (typeof window.scrollBy === 'function') {
+          const inner = innerScroller();
+          if (inner) {
+            inner.scrollTop += scrollStep;
+          } else if (typeof window.scrollBy === 'function') {
             window.scrollBy(0, scrollStep);
           } else if (rootScroller) {
             rootScroller.scrollTop += scrollStep;
@@ -700,7 +718,8 @@ export function buildScrollHarvestJs(webHost, targetCount, options = {}) {
         let securityBlock = false;
         while (true) {
           round++;
-          securityBlock = /请求太频繁|访问频次异常|安全限制/.test(document.body?.innerText || '');
+          securityBlock = /请求太频繁|访问频次异常|安全限制|Requests too frequent|Scan with logged-in/i.test(document.body?.innerText || '') ||
+            window.location.pathname.startsWith('/website-login/captcha');
           if (securityBlock) {
             stopReason = 'security-block';
             metrics = readScrollMetrics();

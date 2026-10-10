@@ -27,6 +27,33 @@ import {
 const isWindows = process.platform === 'win32';
 const LOCAL_PLUGIN_SOURCE_PREFIX = 'local:';
 
+/**
+ * Validate that a plugin name is safe to use as a single path segment under
+ * PLUGINS_DIR. Plugin names originate from attacker-influenceable sources
+ * (a cloned repo's own opencli-plugin.json `name` field, or a monorepo
+ * manifest's own key names), not just the CLI invocation, so a `name` like
+ * `../../etc` must be rejected before it is ever joined into a filesystem
+ * path, not merely resolved-and-checked after the fact (which still allows
+ * the segment-level ".." traversal this guards against).
+ */
+function assertSafePluginName(name: string): void {
+  // Drive-relative paths, alternate streams and Windows aliases also need
+  // rejection: POSIX separator checks alone do not contain these names.
+  if (typeof name !== 'string' || !name || name === '.' || name === '..' || name.trim() !== name ||
+    /[<>:"/\\|?*\x00-\x1f]/.test(name) || /[. ]$/.test(name) ||
+    /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) {
+    throw new PluginError(
+      `Invalid plugin name "${name}".`,
+      'Plugin names must be a single portable directory name without path separators or reserved Windows names.',
+    );
+  }
+  const resolved = path.resolve(PLUGINS_DIR, name);
+  const relative = path.relative(PLUGINS_DIR, resolved);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new PluginError(`Invalid plugin name "${name}".`, 'Resolved outside the plugins directory.');
+  }
+}
+
 /** Get home directory, respecting HOME environment variable for test isolation. */
 function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
@@ -741,6 +768,7 @@ function installSinglePlugin(
   manifest: PluginManifest | null,
 ): string {
   const pluginName = manifest?.name ?? name;
+  assertSafePluginName(pluginName);
   const targetDir = path.join(PLUGINS_DIR, pluginName);
 
   if (fs.existsSync(targetDir)) {
@@ -787,6 +815,7 @@ function installLocalPlugin(localPath: string, name: string): string {
   }
 
   const pluginName = manifest?.name ?? name;
+  assertSafePluginName(pluginName);
   const targetDir = path.join(PLUGINS_DIR, pluginName);
 
   if (fs.existsSync(targetDir)) {
@@ -908,6 +937,7 @@ function installMonorepo(
       continue;
     }
 
+    assertSafePluginName(name);
     const linkPath = path.join(PLUGINS_DIR, name);
     if (fs.existsSync(linkPath)) {
       log.warn(`Skipping "${name}": already installed at ${linkPath}`);
@@ -1050,6 +1080,7 @@ function updateStandaloneLockEntry(
  * directory when no more sub-plugins reference it.
  */
 export function uninstallPlugin(name: string): void {
+  assertSafePluginName(name);
   const targetDir = path.join(PLUGINS_DIR, name);
   if (!fs.existsSync(targetDir)) {
     throw new Error(`Plugin "${name}" is not installed.`);
@@ -1101,6 +1132,7 @@ function isSymlinkSync(p: string): boolean {
  * for all sub-plugins from the same monorepo.
  */
 export function updatePlugin(name: string): void {
+  assertSafePluginName(name);
   const targetDir = path.join(PLUGINS_DIR, name);
   if (!fs.existsSync(targetDir)) {
     throw new Error(`Plugin "${name}" is not installed.`);

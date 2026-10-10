@@ -94,9 +94,12 @@ const FILTER_FIXTURE = [
 ];
 
 function createFilterBehaviorPage(options = {}) {
+    const filterMarkup = options.layout === 'ai-chat'
+        ? '<div class="ai-chat-inner"><div class="filter ai-chat-filter"><span>筛选</span></div></div>'
+        : '<div class="search-layout__top"><div class="filter"><span>筛选</span></div></div>';
     const dom = new JSDOM(`
       <body>
-        <div class="search-layout__top"><div class="filter"><span>筛选</span></div></div>
+        ${filterMarkup}
         <div class="search-layout__main"><div class="feeds-container"></div></div>
       </body>
     `, { url: 'https://www.xiaohongshu.com/search_result?keyword=test' });
@@ -262,24 +265,33 @@ async function runFilterCommand(page, args) {
     return outcome.value;
 }
 
-async function runHarvestFrames(frames, { target = frames.length, stallsBeforeAdvance = 0 } = {}) {
+async function runHarvestFrames(frames, { target = frames.length, stallsBeforeAdvance = 0, layout = 'classic' } = {}) {
     const dom = new JSDOM('<body></body>', {
         url: 'https://www.xiaohongshu.com/search_result?keyword=test',
     });
     const { document } = dom.window;
     const root = document.documentElement;
     const viewport = 600;
+    const innerScroller = layout === 'ai-chat' ? document.createElement('div') : null;
+    if (innerScroller) {
+        innerScroller.className = 'search-layout-wrapper';
+        innerScroller.style.overflowY = 'auto';
+        document.body.append(innerScroller);
+    }
     let frameIndex = 0;
     let scrollTop = 0;
     let scrollCalls = 0;
+    let rootScrollCalls = 0;
     const scrollDeltas = [];
 
     const currentFrame = () => frames[frameIndex];
     const render = () => {
         const frame = currentFrame();
-        document.body.innerHTML = frame.securityBlock
+        const markup = frame.securityBlock
             ? '<main>请求太频繁，请稍后再试</main>'
             : frame.cards.map(noteCard).join('');
+        if (innerScroller) innerScroller.innerHTML = markup;
+        else document.body.innerHTML = markup;
         for (const el of document.querySelectorAll('section.note-item')) markVisible(el);
     };
     render();
@@ -291,7 +303,7 @@ async function runHarvestFrames(frames, { target = frames.length, stallsBeforeAd
     for (const el of [root, document.body]) {
         Object.defineProperty(el, 'scrollHeight', {
             configurable: true,
-            get: () => currentFrame().height,
+            get: () => innerScroller ? viewport : currentFrame().height,
         });
         Object.defineProperty(el, 'scrollTop', {
             configurable: true,
@@ -299,14 +311,36 @@ async function runHarvestFrames(frames, { target = frames.length, stallsBeforeAd
             set: (value) => { scrollTop = Number(value) || 0; },
         });
     }
+    if (innerScroller) {
+        Object.defineProperty(innerScroller, 'scrollHeight', {
+            configurable: true,
+            get: () => currentFrame().height,
+        });
+        Object.defineProperty(innerScroller, 'clientHeight', { configurable: true, value: viewport });
+        Object.defineProperty(innerScroller, 'scrollTop', {
+            configurable: true,
+            get: () => scrollTop,
+            set: (value) => {
+                scrollTop = Number(value) || 0;
+                scrollCalls++;
+                scrollDeltas.push(scrollTop);
+                if (scrollCalls > stallsBeforeAdvance && frameIndex < frames.length - 1) {
+                    frameIndex++;
+                    scrollTop = Math.min(scrollTop, Math.max(0, currentFrame().height - viewport));
+                    render();
+                }
+            },
+        });
+    }
     Object.defineProperty(root, 'clientHeight', { configurable: true, value: viewport });
     Object.defineProperty(dom.window, 'innerHeight', { configurable: true, value: viewport });
     Object.defineProperty(dom.window, 'scrollY', { configurable: true, get: () => scrollTop });
     Object.defineProperty(dom.window, 'pageYOffset', { configurable: true, get: () => scrollTop });
     dom.window.scrollBy = (_x, delta) => {
+        rootScrollCalls++;
         scrollCalls++;
         scrollDeltas.push(delta);
-        if (scrollCalls > stallsBeforeAdvance && frameIndex < frames.length - 1) {
+        if (!innerScroller && scrollCalls > stallsBeforeAdvance && frameIndex < frames.length - 1) {
             frameIndex++;
             scrollTop = Math.min(scrollTop + delta, Math.max(0, currentFrame().height - viewport));
             render();
@@ -334,7 +368,7 @@ async function runHarvestFrames(frames, { target = frames.length, stallsBeforeAd
         dom.window.getComputedStyle.bind(dom.window),
         immediateTimeout,
     );
-    return { result, scrollDeltas };
+    return { result, scrollDeltas, rootScrollCalls };
 }
 describe('xiaohongshu search', () => {
     it('rejects invalid limit before browser navigation', async () => {
@@ -495,6 +529,34 @@ describe('xiaohongshu search', () => {
         });
         expect(page.evaluate).toHaveBeenCalledTimes(1);
         expect(page.newTab).not.toHaveBeenCalled();
+    });
+    it('recognizes an English captcha redirect before the content timeout', async () => {
+        vi.useFakeTimers();
+        try {
+            const dom = new JSDOM('<body>Security Verification</body>', {
+                url: 'https://www.xiaohongshu.com/website-login/captcha',
+            });
+            const page = createPageMock([]);
+            page.evaluate.mockImplementation((script) => Function(
+                'document', 'location', 'MutationObserver', 'setTimeout',
+                `return (${String(script)})`,
+            )(
+                dom.window.document,
+                dom.window.location,
+                dom.window.MutationObserver,
+                setTimeout,
+            ));
+            const pending = getRegistry().get('xiaohongshu/search').func(page, { query: '验证码', limit: 5 }).then(
+                (value) => ({ value }),
+                (error) => ({ error }),
+            );
+
+            await vi.runAllTimersAsync();
+            expect((await pending).error).toMatchObject({ code: 'SECURITY_BLOCK' });
+        }
+        finally {
+            vi.useRealTimers();
+        }
     });
     it('filters out results with no title and respects the limit', async () => {
         const cmd = getRegistry().get('xiaohongshu/search');
@@ -786,6 +848,19 @@ describe('xiaohongshu search filter behavior', () => {
         }
     });
 
+    it('applies requested filters in the AI-chat result layout', async () => {
+        vi.useFakeTimers();
+        try {
+            const page = createFilterBehaviorPage({ layout: 'ai-chat' });
+            await runFilterCommand(page, { sort: 'latest' });
+            expect(page.filterState['排序依据']).toBe('最新');
+            expect(page.filterClicks).toEqual(['排序依据/最新']);
+        }
+        finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('preserves a legitimate filtered zero-result state as EmptyResultError', async () => {
         vi.useFakeTimers();
         try {
@@ -997,6 +1072,17 @@ describe('buildScrollHarvestJs', () => {
 
         expect(result.rows).toHaveLength(1);
         expect(result.diag).toMatchObject({ usable: 1, stopReason: 'exhausted', rounds: 4 });
+    });
+    it('scrolls the AI-chat feed container when the document is not scrollable', async () => {
+        const { result, scrollDeltas, rootScrollCalls } = await runHarvestFrames([
+            { height: 1200, cards: [{ id: '68e90be80000000004022e66', title: '第一屏' }] },
+            { height: 1800, cards: [{ id: '697f6c74000000002103de17', title: '第二屏' }] },
+        ], { target: 2, layout: 'ai-chat' });
+
+        expect(result.rows.map((row) => row.title)).toEqual(['第一屏', '第二屏']);
+        expect(result.diag).toMatchObject({ usable: 2, stopReason: 'target' });
+        expect(scrollDeltas.length).toBeGreaterThan(0);
+        expect(rootScrollCalls).toBe(0);
     });
     it('detects a security block before spending the scroll budget', async () => {
         const { result } = await runHarvestFrames([

@@ -780,7 +780,8 @@ describe('updateAllPlugins', () => {
 
     expect(resC).toBeDefined();
     expect(resC!.success).toBe(true);
-  });
+    // Hosted Windows runners can take >5s for the filesystem transactions.
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 });
 
 // ── Monorepo-specific tests ─────────────────────────────────────────────────
@@ -1484,5 +1485,6 @@ describe('updatePlugin transactional staging', () => {
       kind: 'monorepo',
       subPath: 'packages/old-alpha',
     });
-  });
+    // Keep every rollback assertion; allow slow Windows fixture IO to finish.
+  }, process.platform === 'win32' ? 20_000 : 5_000);
 });
